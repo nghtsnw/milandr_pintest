@@ -11,7 +11,7 @@ void Parcer::getRawData(QByteArray r_data) // разбираем сырые да
     {
                 toQue.insert(0, databyte); // пишем байт в отдельный маленький буфер
                 intToQue = toQue.toHex().toInt(&ok, 16); // конвертируем в инт
-                getByte(intToQue);
+                getByte(intToQue);                
                 toQue.clear();
     }
 }
@@ -19,18 +19,20 @@ void Parcer::getRawData(QByteArray r_data) // разбираем сырые да
 void Parcer::getByte(uint8_t byteFromBuf) // собираем фрейм, при удовлетворении условий отправляем
 {    
     frameMsg.enqueue(byteFromBuf);
-    if ((frameMsg.size() >= 2) && (frameMsg[0] == 0xFF) && (frameMsg[1]==0xFF)) // условие начала пакета
+    if (frameMsg.size() >= 3) // условие начала пакета
     {
-        if (frameMsg.size() == oneMsgLeight)
+        if ((frameMsg[0] == 0xFF) && (frameMsg[1]==0xFF) && ((frameMsg[2]==0x01) || (frameMsg[2]==0x02)|| (frameMsg[2]==0x03)))
         {
-            snapshot = frameMsg.toVector();
-            if (calcCrc(snapshot) == snapshot.last())
-            emit deviceData(snapshot); // если пакет сформирован, отправляем пакет в гуй и обнуляем буфер
-            qDebug() << snapshot;
-            frameMsg.clear();
+            if (frameMsg.size() == oneMsgLeight)
+            {
+                snapshot = frameMsg.toVector();                
+                if (calcCrc(snapshot) == snapshot.last())
+                emit deviceData(snapshot); // если пакет сформирован, отправляем пакет в гуй и обнуляем буфер
+                frameMsg.clear();
+            }
         }
-    }
     else if (frameMsg.size() >= 2) frameMsg.dequeue();// а если сигнатура начала пакета не сошлась то сдвигаем очередь
+    }
 }
 
 uint8_t Parcer::calcCrc(const QVector<uint8_t> &arr)

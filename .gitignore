@@ -98,7 +98,8 @@ compile_commands.json
 
 # Generated output files
 /Listings/*
-/Objects/*
+MCU_Side/Objects/*
+MCU_Side/RTE/*
 
 # Debugger files
 # define exception below if needed

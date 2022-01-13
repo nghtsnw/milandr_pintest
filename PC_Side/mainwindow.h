@@ -26,6 +26,7 @@ class MainWindow : public QMainWindow
 public:
     explicit MainWindow(QWidget *parent = nullptr);
     QTimer mcu_wdt;
+    QTimer response_wdt;
     uint8_t txBuf[4];
 
     struct Settings {
@@ -48,6 +49,7 @@ signals:
     void toTxParcer(QByteArray data);
     void pinStatus(uint8_t portname, uint8_t pin, bool status);
     void enableButton(uint8_t port_in, uint8_t pin_in, bool b);
+    void setButtonText(uint8_t port, uint8_t pin, QString text);
 
 private slots:
     void openSerialPort();
@@ -62,6 +64,7 @@ private slots:
     void fillPortsInfo();
     void updateSettings();
     void applyCustomSettings();
+    void resetConnection();
 
     void setInput();
     void setOutput();
@@ -97,6 +100,8 @@ private:
     Parcer *txparcer = nullptr;
     uint8_t milandrIndex = 0;
     void enableButtonsForDevice();
+    bool waitOfConnection;
+    QString connectionMessage;
 
     uint8_t currentPort;
     uint8_t currentPin;

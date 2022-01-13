@@ -27,6 +27,7 @@ MainWindow::MainWindow(QWidget *parent) :
     connect(m_serial, &QSerialPort::errorOccurred, this, &MainWindow::handleError);
     connect(m_serial, &QSerialPort::readyRead, this, &MainWindow::readData);
     connect(&mcu_wdt, &QTimer::timeout, this, &MainWindow::sendWdt);
+    connect(&response_wdt, &QTimer::timeout, this, &MainWindow::resetConnection);
     connect(this, &MainWindow::toTxParcer, txparcer, &Parcer::getRawData);
     connect(txparcer, &Parcer::deviceData, this, &MainWindow::toPinButtonSender);
     connect(m_settings, &SettingsDialog::updateGlobalSettings, this, &MainWindow::applyCustomSettings);
@@ -38,14 +39,13 @@ MainWindow::MainWindow(QWidget *parent) :
             y++;
             x = 0;
         }
-        PinButton *byteBtn = new PinButton(pname.at(y), x);
+        PinButton *byteBtn = new PinButton(y, x);
         connect(byteBtn, &PinButton::clicked, this, &MainWindow::slotCustomMenuRequested);
         connect(this, &MainWindow::pinStatus, byteBtn, &PinButton::setColor);
         connect(this, &MainWindow::enableButton, byteBtn, &PinButton::enableButton);
-        QString BtnTxt = pnamestr.at(y) + QString::number(x);
-        byteBtn->setText(BtnTxt);
+        connect(this, &MainWindow::setButtonText, byteBtn, &PinButton::setTxt);
         m_ui->dynamicButtonsLayout->addWidget(byteBtn,x,y);
-        emit enableButton(pname.at(y), x, false);
+        emit enableButton(y, x, false);
     }
     fillPortsInfo();
     updateSettings();
@@ -90,36 +90,42 @@ void MainWindow::slotCustomMenuRequested()
 
 void MainWindow::setInput()
 {
-    QVector<uint8_t> command = {0x01, currentPort, currentPin, 0};
+    QVector<uint8_t> command = {0xFF, 0x01, currentPort, currentPin, 0};
     sendCommand(command);
+    emit setButtonText(currentPort, currentPin, "Вход PullUp");
 }
 
 void MainWindow::setOutput()
 {
-    QVector<uint8_t> command = {0x02, currentPort, currentPin, 0};
+    QVector<uint8_t> command = {0xFF, 0x02, currentPort, currentPin, 0};
     sendCommand(command);
+    emit setButtonText(currentPort, currentPin, "Выход 0");
 }
 
 void MainWindow::setOutput1()
 {
-    QVector<uint8_t> command = {0x03, currentPort, currentPin, 0};
+    QVector<uint8_t> command = {0xFF, 0x03, currentPort, currentPin, 0};
     sendCommand(command);
+    emit setButtonText(currentPort, currentPin, "Выход 1");
 }
 
 void MainWindow::setOutput0()
 {
-    QVector<uint8_t> command = {0x04, currentPort, currentPin, 0};
+    QVector<uint8_t> command = {0xFF, 0x04, currentPort, currentPin, 0};
     sendCommand(command);
+    emit setButtonText(currentPort, currentPin, "Выход 0");
 }
 
 void MainWindow::setOutputBlink()
 {
-    QVector<uint8_t> command = {0x05, currentPort, currentPin, 0};
+    QVector<uint8_t> command = {0xFF, 0x05, currentPort, currentPin, 0};
     sendCommand(command);
+    emit setButtonText(currentPort, currentPin, "Выход 1Hz");
 }
 
 void MainWindow::toPinButtonSender(QVector<uint8_t> snapshot)
 {
+    response_wdt.start(3000);
     static uint16_t porta;
     static uint16_t portb;
     static uint16_t portc;
@@ -132,6 +138,7 @@ void MainWindow::toPinButtonSender(QVector<uint8_t> snapshot)
         if (milandrIndex != snapshot[2]){
             milandrIndex = snapshot[2];
             enableButtonsForDevice();
+            showStatusMessage("Соединение установлено. " + connectionMessage);
         }
         porta = snapshot[3] + (snapshot[4] << 8);
         portb = snapshot[5] + (snapshot[6] << 8);
@@ -150,9 +157,9 @@ void MainWindow::toPinButtonSender(QVector<uint8_t> snapshot)
             case 3: portarray = &portd; break;
             case 4: portarray = &porte; break;
             case 5: portarray = &portf; break;
-            default: break;
+            default: portarray = 0; break;
         }
-    setPinStatus(pname[i], portarray);
+    setPinStatus(i, portarray);
     }
 }
 
@@ -178,7 +185,11 @@ void MainWindow::enableButtonsForDevice()
     default: tempVector = {0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0};
     }
     for (int pin_it = 0; pin_it < 16; pin_it++)
+    {
         emit enableButton(port_it, pin_it, tempVector.at(pin_it));
+        if (tempVector.at(pin_it)) emit setButtonText(port_it, pin_it, "Вход PullUp");
+        else emit setButtonText(port_it, pin_it, "Н/Д");
+    }
     }
 }
 
@@ -193,10 +204,12 @@ void MainWindow::openSerialPort()
     m_serial->setFlowControl(p.flowControl);
     if (m_serial->open(QIODevice::ReadWrite))
     {
-        showStatusMessage(tr("Соединено с %1 : %2, %3, %4, %5, %6")
-                          .arg(p.name).arg(p.stringBaudRate).arg(p.stringDataBits)
-                          .arg(p.stringParity).arg(p.stringStopBits).arg(p.stringFlowControl));
-        mcu_wdt.start(500);
+        connectionMessage = (tr("Соединено с %1 : %2, %3, %4, %5, %6")
+                             .arg(p.name).arg(p.stringBaudRate).arg(p.stringDataBits)
+                             .arg(p.stringParity).arg(p.stringStopBits).arg(p.stringFlowControl));
+        showStatusMessage(connectionMessage);
+        mcu_wdt.start(250); // Пинаем контроллер с этим таймером, в ответ получаем данные
+        response_wdt.start(3000); // Если нет ответа от контроллера и таймер вышел, то считаем что нет соединения
     }
     else
     {
@@ -210,7 +223,23 @@ void MainWindow::closeSerialPort()
     if (m_serial->isOpen())
         m_serial->close();
     mcu_wdt.stop();
+    response_wdt.stop();
     showStatusMessage(tr("Соединение отключено"));
+}
+
+void MainWindow::resetConnection()
+{
+    showStatusMessage(tr("Нет ответа от микроконтроллера"));
+    for (int x = 0, y = 0, count = 0; count < (6*16); count++, x++) // Блокируем кнопки в интерфейсе
+    {
+        if (x > 15)
+        {
+            y++;
+            x = 0;
+        }
+        emit enableButton(y, x, false);
+    }
+    milandrIndex = 0;
 }
 
 void MainWindow::fillPortsInfo()
@@ -235,15 +264,14 @@ void MainWindow::fillPortsInfo()
 
         m_ui->portBox->addItem(list.first(), list);
     }
-
     m_ui->portBox->addItem(tr("Расширенные настройки..."));
 }
 
 void MainWindow::updateSettings()
-{ // по умолчанию всё задумано работать так
+{ // по умолчанию всё задумано работать так, конечному пользователю будет проще жить
     m_currentSettings.name = m_ui->portBox->currentText();
-    m_currentSettings.baudRate = 19200;
-    m_currentSettings.stringBaudRate = QString::number(19200);
+    m_currentSettings.baudRate = 115200;
+    m_currentSettings.stringBaudRate = QString::number(115200);
     m_currentSettings.dataBits = QSerialPort::Data8;
     m_currentSettings.stringDataBits = QString::number(8);
     m_currentSettings.parity = QSerialPort::NoParity;
@@ -255,7 +283,7 @@ void MainWindow::updateSettings()
 }
 
 void MainWindow::applyCustomSettings()
-{ // для исключительного случая с одним rs485 адаптером оставил кастомный режим
+{ // для исключительного случая с одним rs485 адаптером (EL201-1) оставил кастомный режим, ему нужен parity: even
     m_currentSettings.name = m_settings->m_currentSettings.name;
     m_currentSettings.baudRate = m_settings->m_currentSettings.baudRate;
     m_currentSettings.stringBaudRate = m_settings->m_currentSettings.stringBaudRate;
@@ -283,7 +311,7 @@ void MainWindow::readData()
 void MainWindow::sendWdt()
 {
     if (m_serial->isOpen()){
-        QVector<uint8_t> wdt_command = {0xA1, 0, 0, 0};
+        QVector<uint8_t> wdt_command = {0xFF, 0xA1, 0, 0, 0};
         sendCommand(wdt_command);
     }
 }
@@ -300,7 +328,7 @@ void MainWindow::sendCommand(QVector<uint8_t> &arr)
 uint8_t MainWindow::calcCrc(const QVector<uint8_t> &arr)
 {
     uint8_t crc = 0;
-    for (int i = 0; i < arr.size()-1; i++) crc += arr[i];
+    for (int i = 0; i < arr.size(); i++) crc += arr[i];
     return crc;
 }
 

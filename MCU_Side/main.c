@@ -6,21 +6,16 @@
 
 signed int delay = 100000000;
 
-void chsend(char);
-uint8_t cnt = 255;
-
-int uart1irqcnt;
-int uart2irqcnt;
 uint16_t receivedData;
-uint8_t newdata = 0;
 uint8_t rxBufCount = 0;
-uint8_t rxBuf[4]; //[код операции, порт, пин, хэш]
-const uint8_t rxBufSize = sizeof(rxBuf) / sizeof(rxBuf[0]);
+uint8_t rxBuf[5]; //[FF, код операции, порт, пин, хэш]
+const uint8_t rxBufSize = 5;
 uint8_t startRxFlag;
+uint8_t startRxReboot = 10;
+uint8_t rxOk = 0;
 void toRxBuf(uint16_t);
-void sendData(uint16_t);
 void readPinState(void);
-uint8_t calcCrc(uint8_t *arr, uint8_t size);
+uint8_t calcCrc(const uint8_t *arr, const uint8_t size);
 void doTask(void);
 void toggleSet(MDR_PORT_TypeDef*, uint32_t);
 uint16_t toggleTimeDiv = 0;
@@ -30,9 +25,14 @@ void toggleTask(void);
 uint16_t watchDogCount;
 void collectTxData(void);
 uint8_t txData[16];
-const uint8_t txDataSize = sizeof(txData) / sizeof(txData[0]);
+uint8_t txDataDebug[16];
+const uint8_t txDataSize = 16;
 void sendTxData(void);
-uint16_t sendTxDataTimeWait = 0;
+uint8_t uartBysy = 0;
+void UART_send_byte(uint8_t);
+uint8_t tmpcrc;
+uint8_t tmpcrc2;
+uint8_t togglePermission = 0;
 
 // Переменные для хранения статуса выводов портов
 uint16_t porta;
@@ -46,19 +46,19 @@ uint16_t porttmp;
 
 #ifdef VE91
 const uint8_t milandrIndex = 0x01;
-const uint8_t pinMap[6][16] = // port, pin, enable or disable
+const uint8_t pinMap[6][16] = // port, pin enable or disable
     {{1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1},{1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1},{1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1},
     {1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1},{1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1},{1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1}};
 
 #elif defined VE92
 const uint8_t milandrIndex = 0x02;
-const uint8_t pinMap[6][16] = // port, pin, enable or disable
+const uint8_t pinMap[6][16] = // port, pin enable or disable
     {{1,1,1,1,1,1,1,1,0,0,0,0,0,0,0,0},{1,1,1,1,1,1,1,1,1,1,1,0,0,0,0},{1,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0},
     {1,1,1,1,1,1,1,1,0,0,0,0,0,0,0,0},{1,1,1,1,0,0,1,1,0,0,0,0,0,0,0,0},{1,1,1,1,1,1,1,0,0,0,0,0,0,0,0,0}};
 		
 #elif defined VE93
 const uint8_t milandrIndex = 0x03;
-const uint8_t pinMap[6][16] = // port, pin, enable or disable
+const uint8_t pinMap[6][16] = // port, pin enable or disable
     {{1,1,1,1,1,1,1,1,0,0,0,0,0,0,0,0},{1,1,1,1,1,1,1,0,0,0,0,0,0,0,0,0},{1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0},
     {1,1,1,1,0,0,0,0,0,0,0,0,0,0,0,0},{1,0,1,1,0,0,1,0,0,0,0,0,0,0,0,0},{1,1,1,1,1,1,0,0,0,0,0,0,0,0,0,0}};
 
@@ -75,81 +75,69 @@ int main(void)
 {    
   delay = 1000000; // Предпусковая задержка
   while(--delay) __nop();		
-	Clock_Init_HSE_PLL(PLL_MUL - 1); //	Тактирование ядра от внешнего кварца (HSE)	
-	UART_Initialize(UART_RATE); //	Инициализация UART
-	UART_InitIRQ(1);
+//	txDataSize = sizeof(txData) / sizeof(txData[0]);
+//	rxBufSize = sizeof(rxBuf) / sizeof(rxBuf[0]);
+	Clock_Init_HSE_PLL(PLL_MUL - 1); //	Тактирование ядра от внешнего кварца (HSE)		
 	
-	#define TimerTick CPU_FREQ/1000-1 // Количество тактов процессора до прерывания
+	#define TimerTick CPU_FREQ/10 // Количество тактов процессора до прерывания
 	SysTick_Config(TimerTick); // Инициализация таймера SysTick
+	
+	UART_Initialize(UART_RATE); //	Инициализация всех портов как входы с подтяжкой к питанию, и UART
+	UART_InitIRQ(1);
 	
 	while (1)
   {
-    if (watchDogCount >= 3){
-		watchDogCount = 0;
-		UART_Initialize(UART_RATE); // Если три секунды не было сброса переменной - сбрасывается конфигурация портов
-		}
-		readPinState();
+    if (watchDogCount >= 35){
+			UART_DeinitFunc();
+			watchDogCount = 0;
+			UART_Initialize(UART_RATE); // Если три секунды не было сброса переменной - сбрасывается конфигурация портов
+			UART_InitIRQ(1);
+			rxBufCount = 0;
+			startRxFlag = 1;
+		}		
+		readPinState();		
+		if (rxOk){
 		collectTxData();
-		if(sendTxDataTimeWait >= 250){
-			UART_ITConfig(UART_X, UART_IT_RX, DISABLE);
-			#ifdef RS485_EN
-			RS485_TX_ON; 
-			#endif			
-			sendTxData();
-			
-			delay = 10000;
-			while (delay--);
-			
-			#ifdef RS485_EN
-			RS485_TX_OFF; 
-			#endif
-			UART_ClearITPendingBit (UART_X, UART_IT_RX);      
-      UART_ITConfig(UART_X, UART_IT_RX, ENABLE);
-			sendTxDataTimeWait = 0;
+		sendTxData();
+		rxOk = 0;
 		}
  }
 }
 
-void UART_Handler_RX(void)
-{		
-  // Обработка прерывания по Приему данных
-  if (UART_GetITStatusMasked (UART_X, UART_IT_RX) == SET)
-  {
-    // Сброс прерывания
-      UART_ClearITPendingBit (UART_X, UART_IT_RX);      
-      UART_ITConfig(UART_X, UART_IT_RX, ENABLE);
-			if (UART_ReceiveData (UART_X) == 0xFF) // Маркер начала запроса
-			{				
-				startRxFlag = 1;				
-			}
-			else if (startRxFlag == 1)
-			toRxBuf(UART_ReceiveData (UART_X));	
-  }
-	
-  // Обработка прерывания от Передачи данных
-  if (UART_GetITStatusMasked(UART_X, UART_IT_TX) == SET)
-  {
-    // Сброс прерывания
-    UART_ClearITPendingBit (UART_X, UART_IT_TX);
-  }	
-}
-
 void toRxBuf(uint16_t word)
 {
+	if (word == 0xFF && uartBysy == 0){
+		startRxFlag = 1;
+		rxBufCount = 0;
+	}
 	if (startRxFlag)
-	{
-		rxBuf[rxBufCount] = word;
-		if (rxBufCount < rxBufSize) rxBufCount++;
-		else if (calcCrc(rxBuf, rxBufSize) == rxBuf[rxBufSize-1])	
-		{
-				doTask();
-				startRxFlag = 0;
-		}
+	{					
+				rxBuf[rxBufCount] = word;
+				if (rxBufCount < rxBufSize) rxBufCount++;
+		if (rxBufCount >= 5) // Выглядит хреново, но с else почему-то не входило в тело, оставлю пока что так 
+				{
+					rxBufCount = 0;
+					startRxFlag = 0;
+					tmpcrc = (calcCrc(rxBuf, rxBufSize));
+					tmpcrc2 = (rxBuf[4]); //(rxBuf[rxBufSize-1]);
+					if (tmpcrc == tmpcrc2)	
+					{
+						doTask();
+						rxOk = 1;						
+					}
+					else // Если crc не прошло то нужно обнулить счётчик и некоторое время не читать данные
+					{ // Как вариант то поднять startRxFlag в systick таймере где нибудь через треть секунды						
+						rxOk = 0;
+						startRxReboot = 0;
+					}
+				}
 	}
 }
 
 void doTask()
 {
+	NVIC_DisableIRQ(UART1_IRQn);
+	NVIC_DisableIRQ(SysTick_IRQn);
 	// Код действия в первом байте:
 	// 01 - установить как вход с подтяжкой к питанию
 	// 02 - установить как выход
@@ -161,31 +149,28 @@ void doTask()
 	
 	
 	static MDR_PORT_TypeDef  *MDR_PORT_X;
-	     if (rxBuf[1] == 0x0A) MDR_PORT_X = MDR_PORTA;
-	else if (rxBuf[1] == 0x0B) MDR_PORT_X = MDR_PORTB;
-	else if (rxBuf[1] == 0x0C) MDR_PORT_X = MDR_PORTC;
-	else if (rxBuf[1] == 0x0D) MDR_PORT_X = MDR_PORTD;
-	else if (rxBuf[1] == 0x0E) MDR_PORT_X = MDR_PORTE;
-	else if (rxBuf[1] == 0x0F) MDR_PORT_X = MDR_PORTF;
+	     if (rxBuf[2] == 0x00) MDR_PORT_X = MDR_PORTA;
+	else if (rxBuf[2] == 0x01) MDR_PORT_X = MDR_PORTB;
+	else if (rxBuf[2] == 0x02) MDR_PORT_X = MDR_PORTC;
+	else if (rxBuf[2] == 0x03) MDR_PORT_X = MDR_PORTD;
+	else if (rxBuf[2] == 0x04) MDR_PORT_X = MDR_PORTE;
+	else if (rxBuf[2] == 0x05) MDR_PORT_X = MDR_PORTF;
 	
 	static uint16_t PORT_Pin_X;
 	if (rxBuf[2] == 0x00) PORT_Pin_X = PORT_Pin_0;
-	else if (rxBuf[2] == 0x01) PORT_Pin_X = PORT_Pin_1;
-	else if (rxBuf[2] == 0x02) PORT_Pin_X = PORT_Pin_2;
-	else if (rxBuf[2] == 0x03) PORT_Pin_X = PORT_Pin_3;
-	else if (rxBuf[2] == 0x04) PORT_Pin_X = PORT_Pin_4;
-	else if (rxBuf[2] == 0x05) PORT_Pin_X = PORT_Pin_5;
-	else if (rxBuf[2] == 0x06) PORT_Pin_X = PORT_Pin_6;
-	else if (rxBuf[2] == 0x07) PORT_Pin_X = PORT_Pin_7;
+	else if (rxBuf[3] == 0x01) PORT_Pin_X = PORT_Pin_1;
+	else if (rxBuf[3] == 0x02) PORT_Pin_X = PORT_Pin_2;
+	else if (rxBuf[3] == 0x03) PORT_Pin_X = PORT_Pin_3;
+	else if (rxBuf[3] == 0x04) PORT_Pin_X = PORT_Pin_4;
+	else if (rxBuf[3] == 0x05) PORT_Pin_X = PORT_Pin_5;
+	else if (rxBuf[3] == 0x06) PORT_Pin_X = PORT_Pin_6;
+	else if (rxBuf[3] == 0x07) PORT_Pin_X = PORT_Pin_7;
 	
-	switch (rxBuf[0])
+	switch (rxBuf[1])
 	{
-		case 0x01: // 01 - установить как вход с подтяжкой к питанию					
-			// Общая конфигурация линий ввода-вывода
+		case 0x01: // 01 - установить как вход с подтяжкой к питанию
+			togglePermission = 0;
 			PORT_StructInit (&GPIOInitStruct);
-			GPIOInitStruct.PORT_SPEED = PORT_SPEED_MAXFAST;
-			GPIOInitStruct.PORT_MODE  = PORT_MODE_DIGITAL;
-	
 			// Инициализация входа с подтяжкой к питанию
 			GPIOInitStruct.PORT_SPEED = PORT_SPEED_SLOW;
 			GPIOInitStruct.PORT_MODE  = PORT_MODE_DIGITAL;
@@ -196,41 +181,43 @@ void doTask()
 			PORT_Init (MDR_PORT_X, &GPIOInitStruct);
 			break;
 		
-		case 0x02: // 02 - установить как выход		
-			// Общая конфигурация линий ввода-вывода
-			PORT_StructInit (&GPIOInitStruct);
-			GPIOInitStruct.PORT_SPEED = PORT_SPEED_MAXFAST;
-			GPIOInitStruct.PORT_MODE  = PORT_MODE_DIGITAL;
-	
+		case 0x02: // 02 - установить как выход					
+			PORT_StructInit (&GPIOInitStruct);			
 			// Инициализация выхода
 			GPIOInitStruct.PORT_SPEED = PORT_SPEED_SLOW;
 			GPIOInitStruct.PORT_MODE  = PORT_MODE_DIGITAL;
 			GPIOInitStruct.PORT_FUNC  = PORT_FUNC_PORT;	
 			GPIOInitStruct.PORT_OE    = PORT_OE_OUT;
 			GPIOInitStruct.PORT_PULL_UP = PORT_PULL_UP_OFF;
-			GPIOInitStruct.PORT_Pin   = PORT_Pin_X;
+			GPIOInitStruct.PORT_Pin   = PORT_Pin_X;			
 			PORT_Init (MDR_PORT_X, &GPIOInitStruct);
+			togglePermission = 0;
+			PORT_ResetBits(MDR_PORT_X, PORT_Pin_X);
 			break;
 		
 		case 0x03: // 03 - выход в состояние 1
+			togglePermission = 0;
 			PORT_SetBits(MDR_PORT_X, PORT_Pin_X);
 			break;
 		
 		case 0x04: // 04 - выход в состояние 0
+			togglePermission = 0;
 			PORT_ResetBits(MDR_PORT_X, PORT_Pin_X);
 			break;
 		
 		case 0x05: // 05 - моргать выходом с частотой 1Hz
 			toggleSet(MDR_PORT_X, PORT_Pin_X);
+			togglePermission = 1;
 			break;
 		
 		case 0xA1: // A1 - сброс watchdog, если долго нету (отсутсвие связи) то контроллер переводит все порты в режим входов (в main())
 			watchDogCount = 0;
-		  sendTxData(); // Тут же отправляем данные
 			break;
 			
 		default: break;
 	}
+	NVIC_EnableIRQ(UART1_IRQn);
+	NVIC_EnableIRQ(SysTick_IRQn);
 }
 
 void collectTxData()
@@ -250,17 +237,7 @@ void collectTxData()
 	txData[12] = porte >> 8;
 	txData[13] = portf;
 	txData[14] = portf >> 8;
-	//NVIC_DisableIRQ (SysTick_IRQn);
-	txData[15] = calcCrc(txData, txDataSize-1);
-	//NVIC_EnableIRQ (SysTick_IRQn);
-}
-
-void sendTxData()
-{	
-	for (int i = 0; i < txDataSize; i++)
-	{
-		sendData(txData[i]);
-	}	
+	txData[15] = calcCrc(txData, txDataSize);
 }
 
 void readPinState() // Заполнение массивов со статусами ножек контроллера, можно было бы сделать проще через RXTX
@@ -371,25 +348,59 @@ void readPinState() // Заполнение массивов со статуса
 }
 
 
-uint8_t calcCrc(uint8_t *arr, uint8_t arrSize)
+uint8_t calcCrc(const uint8_t *arr, const uint8_t arrSize)
 {
-	static uint16_t crc;
+	static uint8_t crc;
 	crc = 0;
-	for (int i = 0; i <= arrSize; i++) crc += arr[i];
+	for (int i = 0; i < arrSize-1; i++) crc += arr[i];
 	return crc;
 }
 
-void sendData(uint16_t tosend)
-{  
-  UART_SendData (UART_X, tosend);
+
+void sendTxData(void){
+    int i = 0;
+    if (uartBysy == 0){
+    uartBysy = 1;
+    } 
+		
+		#ifdef RS485_EN
+		RS485_TX_ON; 
+		#endif	
+		
+    while(i <= 15){ // Скармливаем весь массив в цикле    
+    UART_send_byte(txData[i]);
+			i++;
+		}
+			
+		#ifdef RS485_EN
+		RS485_TX_OFF; 
+		#endif
+    uartBysy = 0;
 }
 
-void SysTick_Handler(void)
+void UART_send_byte(uint8_t byte)
+{
+	NVIC_DisableIRQ(SysTick_IRQn);
+	UART_SendData(UART_X, byte);
+	// Костыли для миландров
+	while(UART_GetFlagStatus (UART_X, UART_FLAG_BUSY) || !UART_GetFlagStatus (UART_X, UART_FLAG_RXFF));
+	UART_ReceiveData (UART_X); 
+	UART_ClearITPendingBit(UART_X, UART_IT_RX);
+	NVIC_EnableIRQ(SysTick_IRQn);
+	
+}
+
+void SysTick_Handler(void) // 100 мс
 {	
-	if (toggleTimeDiv >=1000) toggleTask();
+	if (toggleTimeDiv >=10){ // Это для моргания раз в секунду выбранной ножкой
+		toggleTask();
+		toggleTimeDiv = 0;
+	}		
 	watchDogCount++;
 	toggleTimeDiv++;
-	sendTxDataTimeWait++;
+	
+	if (startRxReboot < 10) startRxReboot++; // Перерыв в разрешении читать уарт, если данные пришли битые
+	else startRxFlag = 1; // По окончании перерыва поднимаем разрешение читать уарт
 }
 
 void toggleSet(MDR_PORT_TypeDef *MDR_PORT_Xt, uint32_t MDR_Pin_Xt)
@@ -400,19 +411,31 @@ void toggleSet(MDR_PORT_TypeDef *MDR_PORT_Xt, uint32_t MDR_Pin_Xt)
 
 void toggleTask()
 {
-	if (PORT_ReadInputDataBit (tPort, tPin) == 1) PORT_ResetBits(tPort, tPin);
-	else PORT_SetBits(tPort, tPin);
-	toggleTimeDiv = 0;
+	if (togglePermission)
+	{
+		if (PORT_ReadInputDataBit (tPort, tPin) == 1) PORT_ResetBits(tPort, tPin);
+		else PORT_SetBits(tPort, tPin);	
+	}
 }
 
-void UART1_IRQHandler (void)
-{
-	UART_Handler_RX();
-  ++uart1irqcnt;
+void UART1_IRQHandler(void)
+	{  
+   if (UART_GetITStatusMasked (UART_X, UART_IT_RX) == SET){
+     UART_ClearITPendingBit (UART_X, UART_IT_RX);		
+		 if (startRxFlag && !uartBysy) toRxBuf(UART_ReceiveData(UART_X));
+    }
+  if (UART_GetITStatusMasked(UART_X, UART_IT_TX) == SET){ // Сброс прерывания по TX
+    UART_ClearITPendingBit (UART_X, UART_IT_TX);
+  }	
 }
 
-void UART2_IRQHandler (void)
-{
-	UART_Handler_RX();
-  ++uart2irqcnt;
+void UART2_IRQHandler(void)
+{  
+   if (UART_GetITStatusMasked (UART_X, UART_IT_RX) == SET){
+     if (startRxFlag && !uartBysy) toRxBuf(UART_ReceiveData(UART_X)); 
+		 UART_ClearITPendingBit (UART_X, UART_IT_RX);		  
+    }
+  if (UART_GetITStatusMasked(UART_X, UART_IT_TX) == SET){ // Сброс прерывания по TX
+    UART_ClearITPendingBit (UART_X, UART_IT_TX);
+  }	
 }

@@ -20,7 +20,7 @@ private:
     void getByte(uint8_t byteFromBuf);
     QByteArray toQue;
     int intToQue = 0;
-    const int oneMsgLeight = 40;
+    const int oneMsgLeight = 16;
     QQueue<uint8_t> frameMsg;
     QVector<uint8_t> snapshot;
     bool ok;
