@@ -33,6 +33,8 @@ void UART_send_byte(uint8_t);
 uint8_t tmpcrc;
 uint8_t tmpcrc2;
 uint8_t togglePermission = 0;
+int transmitCount;
+void setAsOut(MDR_PORT_TypeDef*, uint16_t);
 
 // Переменные для хранения статуса выводов портов
 uint16_t porta;
@@ -65,7 +67,6 @@ const uint8_t pinMap[6][16] = // port, pin enable or disable
 #endif
 
 //	Тактовая частота ядра
-#define PLL_MUL  1										// = RST_CLK_CPU_PLLmul16 + 1
 #define CPU_FREQ HSE_Value * PLL_MUL	// 8MHz * 1
 
 #define RS485_TX_ON		PORT_SetBits(RS485_PORT_TX, RS485_PinTX)
@@ -83,19 +84,21 @@ int main(void)
 	SysTick_Config(TimerTick); // Инициализация таймера SysTick
 	
 	UART_Initialize(UART_RATE); //	Инициализация всех портов как входы с подтяжкой к питанию, и UART
-	UART_InitIRQ(1);
+	UART_InitIRQ(2);
 	
 	while (1)
   {
     if (watchDogCount >= 35){
+			UART_Cmd (UART_X, DISABLE);
 			UART_DeinitFunc();
 			watchDogCount = 0;
 			UART_Initialize(UART_RATE); // Если три секунды не было сброса переменной - сбрасывается конфигурация портов
 			UART_InitIRQ(1);
 			rxBufCount = 0;
 			startRxFlag = 1;
-		}		
-		readPinState();		
+			UART_Cmd (UART_X, ENABLE);
+		}
+		
 		if (rxOk){
 		collectTxData();
 		sendTxData();
@@ -182,30 +185,33 @@ void doTask()
 			break;
 		
 		case 0x02: // 02 - установить как выход					
-			PORT_StructInit (&GPIOInitStruct);			
-			// Инициализация выхода
-			GPIOInitStruct.PORT_SPEED = PORT_SPEED_SLOW;
-			GPIOInitStruct.PORT_MODE  = PORT_MODE_DIGITAL;
-			GPIOInitStruct.PORT_FUNC  = PORT_FUNC_PORT;	
-			GPIOInitStruct.PORT_OE    = PORT_OE_OUT;
-			GPIOInitStruct.PORT_PULL_UP = PORT_PULL_UP_OFF;
-			GPIOInitStruct.PORT_Pin   = PORT_Pin_X;			
-			PORT_Init (MDR_PORT_X, &GPIOInitStruct);
-			togglePermission = 0;
-			PORT_ResetBits(MDR_PORT_X, PORT_Pin_X);
+//			PORT_StructInit (&GPIOInitStruct);			
+//			// Инициализация выхода
+//			GPIOInitStruct.PORT_SPEED = PORT_SPEED_SLOW;
+//			GPIOInitStruct.PORT_MODE  = PORT_MODE_DIGITAL;
+//			GPIOInitStruct.PORT_FUNC  = PORT_FUNC_PORT;	
+//			GPIOInitStruct.PORT_OE    = PORT_OE_OUT;
+//			GPIOInitStruct.PORT_PULL_UP = PORT_PULL_UP_OFF;
+//			GPIOInitStruct.PORT_Pin   = PORT_Pin_X;			
+//			PORT_Init (MDR_PORT_X, &GPIOInitStruct);
+//			togglePermission = 0;
+//			PORT_ResetBits(MDR_PORT_X, PORT_Pin_X);
 			break;
 		
 		case 0x03: // 03 - выход в состояние 1
+			setAsOut(MDR_PORT_X, PORT_Pin_X);
 			togglePermission = 0;
 			PORT_SetBits(MDR_PORT_X, PORT_Pin_X);
 			break;
 		
 		case 0x04: // 04 - выход в состояние 0
+			setAsOut(MDR_PORT_X, PORT_Pin_X);
 			togglePermission = 0;
 			PORT_ResetBits(MDR_PORT_X, PORT_Pin_X);
 			break;
 		
 		case 0x05: // 05 - моргать выходом с частотой 1Hz
+			setAsOut(MDR_PORT_X, PORT_Pin_X);
 			toggleSet(MDR_PORT_X, PORT_Pin_X);
 			togglePermission = 1;
 			break;
@@ -218,6 +224,22 @@ void doTask()
 	}
 	NVIC_EnableIRQ(UART1_IRQn);
 	NVIC_EnableIRQ(SysTick_IRQn);
+}
+
+void setAsOut(MDR_PORT_TypeDef  *MDR_PORT_X, uint16_t PORT_Pin_X)
+{
+			static PORT_InitTypeDef GPIOInitStruct;
+			PORT_StructInit (&GPIOInitStruct);			
+			// Инициализация выхода
+			GPIOInitStruct.PORT_SPEED = PORT_SPEED_SLOW;
+			GPIOInitStruct.PORT_MODE  = PORT_MODE_DIGITAL;
+			GPIOInitStruct.PORT_FUNC  = PORT_FUNC_PORT;	
+			GPIOInitStruct.PORT_OE    = PORT_OE_OUT;
+			GPIOInitStruct.PORT_PULL_UP = PORT_PULL_UP_OFF;
+			GPIOInitStruct.PORT_Pin   = PORT_Pin_X;			
+			PORT_Init (MDR_PORT_X, &GPIOInitStruct);
+			togglePermission = 0;
+			PORT_ResetBits(MDR_PORT_X, PORT_Pin_X);
 }
 
 void collectTxData()
@@ -237,7 +259,11 @@ void collectTxData()
 	txData[12] = porte >> 8;
 	txData[13] = portf;
 	txData[14] = portf >> 8;
+	NVIC_DisableIRQ(UART1_IRQn);
+	NVIC_DisableIRQ(SysTick_IRQn);
 	txData[15] = calcCrc(txData, txDataSize);
+	NVIC_EnableIRQ(UART1_IRQn);
+	NVIC_EnableIRQ(SysTick_IRQn);
 }
 
 void readPinState() // Заполнение массивов со статусами ножек контроллера, можно было бы сделать проще через RXTX
@@ -358,23 +384,25 @@ uint8_t calcCrc(const uint8_t *arr, const uint8_t arrSize)
 
 
 void sendTxData(void){
-    int i = 0;
+    transmitCount = 0;
     if (uartBysy == 0){
     uartBysy = 1;
     } 
-		
+		UART_ITConfig(UART_X,UART_IT_RX, DISABLE);
 		#ifdef RS485_EN
 		RS485_TX_ON; 
 		#endif	
 		
-    while(i <= 15){ // Скармливаем весь массив в цикле    
-    UART_send_byte(txData[i]);
-			i++;
+    while(transmitCount <= 15){ // Скармливаем весь массив в цикле    
+    UART_send_byte(txData[transmitCount]);
+			transmitCount++;
 		}
-			
+		
 		#ifdef RS485_EN
 		RS485_TX_OFF; 
 		#endif
+		UART_ClearITPendingBit( UART_X, UART_IT_RX);
+		UART_ITConfig(UART_X, UART_IT_RX, ENABLE);
     uartBysy = 0;
 }
 
@@ -383,7 +411,7 @@ void UART_send_byte(uint8_t byte)
 	NVIC_DisableIRQ(SysTick_IRQn);
 	UART_SendData(UART_X, byte);
 	// Костыли для миландров
-	while(UART_GetFlagStatus (UART_X, UART_FLAG_BUSY) || !UART_GetFlagStatus (UART_X, UART_FLAG_RXFF));
+	while (UART_X->FR & UART_FLAG_BUSY);
 	UART_ReceiveData (UART_X); 
 	UART_ClearITPendingBit(UART_X, UART_IT_RX);
 	NVIC_EnableIRQ(SysTick_IRQn);
@@ -396,6 +424,7 @@ void SysTick_Handler(void) // 100 мс
 		toggleTask();
 		toggleTimeDiv = 0;
 	}		
+	readPinState();		
 	watchDogCount++;
 	toggleTimeDiv++;
 	

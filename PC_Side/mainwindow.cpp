@@ -26,7 +26,7 @@ MainWindow::MainWindow(QWidget *parent) :
     m_ui->statusBar->addWidget(m_status);
     connect(m_serial, &QSerialPort::errorOccurred, this, &MainWindow::handleError);
     connect(m_serial, &QSerialPort::readyRead, this, &MainWindow::readData);
-    connect(&mcu_wdt, &QTimer::timeout, this, &MainWindow::sendWdt);
+    connect(&mcu_wdt, &QTimer::timeout, this, &MainWindow::sendCommand);
     connect(&response_wdt, &QTimer::timeout, this, &MainWindow::resetConnection);
     connect(this, &MainWindow::toTxParcer, txparcer, &Parcer::getRawData);
     connect(txparcer, &Parcer::deviceData, this, &MainWindow::toPinButtonSender);
@@ -49,6 +49,7 @@ MainWindow::MainWindow(QWidget *parent) :
     }
     fillPortsInfo();
     updateSettings();
+    showStatusMessage("Milandr Pin Test, Илья Кияшко, 2022");
 }
 
 MainWindow::~MainWindow()
@@ -67,20 +68,17 @@ void MainWindow::slotCustomMenuRequested()
 
     QMenu * menu = new QMenu(this);
 
-    QAction * setInput = new QAction(("Инициализировать пин как вход с подтяжкой к питанию (по умолчанию)"), this);
-    QAction * setOutput = new QAction(("Инициализировать пин как выход"), this);
-    QAction * setOutput1 = new QAction(("Установить выход в состояние 1"), this);
-    QAction * setOutput0 = new QAction(("Установить выход в состояние 0"), this);
-    QAction * setOutputBlink = new QAction(("Установить выход с автопереключением состояния 1Hz"), this);
+    QAction * setInput = new QAction(("Вход с подтяжкой к питанию (по умолчанию)"), this);
+    QAction * setOutput1 = new QAction(("Выход в состояние 1"), this);
+    QAction * setOutput0 = new QAction(("Выход в состояние 0"), this);
+    QAction * setOutputBlink = new QAction(("Выход с автопереключением состояния 1Hz"), this);
 
     connect(setInput, SIGNAL(triggered()), this, SLOT(setInput()));
-    connect(setOutput, SIGNAL(triggered()), this, SLOT(setOutput()));
     connect(setOutput1, SIGNAL(triggered()), this, SLOT(setOutput1()));
     connect(setOutput0, SIGNAL(triggered()), this, SLOT(setOutput0()));
     connect(setOutputBlink, SIGNAL(triggered()), this, SLOT(setOutputBlink()));
 
     menu->addAction(setInput);
-    menu->addAction(setOutput);
     menu->addAction(setOutput1);
     menu->addAction(setOutput0);
     menu->addAction(setOutputBlink);
@@ -91,35 +89,38 @@ void MainWindow::slotCustomMenuRequested()
 void MainWindow::setInput()
 {
     QVector<uint8_t> command = {0xFF, 0x01, currentPort, currentPin, 0};
-    sendCommand(command);
+    toTransmit = command;
+    newcommand = true;
     emit setButtonText(currentPort, currentPin, "Вход PullUp");
-}
-
-void MainWindow::setOutput()
-{
-    QVector<uint8_t> command = {0xFF, 0x02, currentPort, currentPin, 0};
-    sendCommand(command);
-    emit setButtonText(currentPort, currentPin, "Выход 0");
 }
 
 void MainWindow::setOutput1()
 {
     QVector<uint8_t> command = {0xFF, 0x03, currentPort, currentPin, 0};
-    sendCommand(command);
+    toTransmit = command;
+    newcommand = true;
     emit setButtonText(currentPort, currentPin, "Выход 1");
 }
 
 void MainWindow::setOutput0()
 {
     QVector<uint8_t> command = {0xFF, 0x04, currentPort, currentPin, 0};
-    sendCommand(command);
+    toTransmit = command;
+    newcommand = true;
     emit setButtonText(currentPort, currentPin, "Выход 0");
 }
 
 void MainWindow::setOutputBlink()
 {
+    if ((blinkPort != currentPort) && (blinkPin != currentPin) && (blinkPort != 999) && (blinkPin != 999))
+    {
+       emit setButtonText(blinkPort, blinkPin, "Выход 1Hz Стоп");
+    }
+    blinkPort = currentPort;
+    blinkPin = currentPin;
     QVector<uint8_t> command = {0xFF, 0x05, currentPort, currentPin, 0};
-    sendCommand(command);
+    toTransmit = command;
+    newcommand = true;
     emit setButtonText(currentPort, currentPin, "Выход 1Hz");
 }
 
@@ -209,7 +210,7 @@ void MainWindow::openSerialPort()
                              .arg(p.stringParity).arg(p.stringStopBits).arg(p.stringFlowControl));
         showStatusMessage(connectionMessage);
         mcu_wdt.start(250); // Пинаем контроллер с этим таймером, в ответ получаем данные
-        response_wdt.start(3000); // Если нет ответа от контроллера и таймер вышел, то считаем что нет соединения
+        response_wdt.start(3000); // Если нет ответа от контроллера и этот таймер вышел, то считаем что нет соединения
     }
     else
     {
@@ -224,6 +225,7 @@ void MainWindow::closeSerialPort()
         m_serial->close();
     mcu_wdt.stop();
     response_wdt.stop();
+    resetConnection();
     showStatusMessage(tr("Соединение отключено"));
 }
 
@@ -308,21 +310,17 @@ void MainWindow::readData()
     emit toTxParcer(data);
 }
 
-void MainWindow::sendWdt()
+void MainWindow::sendCommand()
 {
     if (m_serial->isOpen()){
-        QVector<uint8_t> wdt_command = {0xFF, 0xA1, 0, 0, 0};
-        sendCommand(wdt_command);
+        if (!newcommand) toTransmit = {0xFF, 0xA1, 0, 0, 0};
+        toTransmit.last() = calcCrc(toTransmit);
+        QByteArray ba;
+        for (auto i : qAsConst(toTransmit))
+            ba.append(i);
+        writeData(ba);
+        if (newcommand) newcommand = false;
     }
-}
-
-void MainWindow::sendCommand(QVector<uint8_t> &arr)
-{
-    arr.last() = calcCrc(arr);
-    QByteArray ba;
-    for (auto i : qAsConst(arr))
-        ba.append(i);
-    writeData(ba);
 }
 
 uint8_t MainWindow::calcCrc(const QVector<uint8_t> &arr)

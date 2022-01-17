@@ -65,7 +65,7 @@ void UART_Initialize (uint32_t uartBaudRate)
   // Конфигурация модуля UART
   UARTInitStruct.UART_BaudRate            = uartBaudRate;                  // Скорость передачи данных
   UARTInitStruct.UART_WordLength          = UART_WordLength8b;             // Количество битов данных в сообщении
-  UARTInitStruct.UART_StopBits            = UART_StopBits1;                // Количество STOP-битов
+  UARTInitStruct.UART_StopBits            = UART_StopBits2;                // Количество STOP-битов //поменял на 2 для опытов
   UARTInitStruct.UART_Parity              = UART_Parity_No;                // Контроль четности
   UARTInitStruct.UART_FIFOMode            = UART_FIFO_OFF;                 // Включение/отключение буфера
   UARTInitStruct.UART_HardwareFlowControl = UART_HardwareFlowControl_RXE   // Аппаратный контроль за передачей и приемом данных
@@ -82,12 +82,13 @@ void UART_Initialize (uint32_t uartBaudRate)
   UART_ITConfig (UART_X, UART_IT_RX | UART_IT_TX, ENABLE);
 
   // Разрешение работы модуля UART
-  UART_Cmd (UART_X, ENABLE);
+  //UART_Cmd (UART_X, ENABLE);
 }
 
 void UART_DeinitFunc(void)
 {
-    UART_DeInit (UART_X);
+    UART_Cmd (UART_X, DISABLE);
+		UART_DeInit (UART_X);
     NVIC_DisableIRQ (UART_IRQ);
 }
 

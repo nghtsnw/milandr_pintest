@@ -57,8 +57,7 @@ private slots:
     void writeData(const QByteArray &data);
     void readData();
     void handleError(QSerialPort::SerialPortError error);
-    void sendWdt();
-    void sendCommand(QVector<uint8_t> &arr);
+    void sendCommand();
     void slotCustomMenuRequested();
     void toPinButtonSender(QVector<uint8_t> snapshot);
     void fillPortsInfo();
@@ -67,7 +66,6 @@ private slots:
     void resetConnection();
 
     void setInput();
-    void setOutput();
     void setOutput1();
     void setOutput0();
     void setOutputBlink();
@@ -102,9 +100,14 @@ private:
     void enableButtonsForDevice();
     bool waitOfConnection;
     QString connectionMessage;
+    QVector<uint8_t> toTransmit;
+    bool newcommand;
 
     uint8_t currentPort;
     uint8_t currentPin;
+
+    int blinkPort = 999; // Стартовые значения не равные тому какими могут быть порты и пины
+    int blinkPin = 999;
 
     Settings m_currentSettings;
 };
