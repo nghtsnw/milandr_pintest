@@ -15,15 +15,15 @@ public:
     int pin;
 
 signals:
-    void setState(uint8_t state, int port, int pin);
+    void setState(quint8 state, int port, int pin);
 
 public slots:
     void setTxt(int port, int pin, QString text);
-    void setColor(uint8_t port, uint8_t pin, bool color);
-    void enableButton(uint8_t port_in, uint8_t pin_in, bool b);
+    void setColor(quint8 port, quint8 pin, bool color);
+    void enableButton(quint8 port_in, quint8 pin_in, bool b);
 
 private:
-    void state(uint8_t state);
+    void state(quint8 state);
     const QVector<QString> pnamestr = {"PA", "PB", "PC", "PD", "PE", "PF"};
 };
 

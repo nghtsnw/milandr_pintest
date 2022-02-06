@@ -12,7 +12,7 @@ PinButton::PinButton(int port_init, int pin_init)
     setTxt(port, pin, "Н/Д");
 }
 
-void PinButton::state(uint8_t state)
+void PinButton::state(quint8 state)
 {
     emit setState(state, port, pin);
 }
@@ -23,7 +23,7 @@ void PinButton::setTxt(int port_in, int pin_in, QString text_in)
         this->setText(pnamestr.at(port) + QString::number(pin) + " - " + text_in);
 }
 
-void PinButton::setColor(uint8_t port_in, uint8_t pin_in, bool color)
+void PinButton::setColor(quint8 port_in, quint8 pin_in, bool color)
 {
     if (port_in == port && pin_in == pin && this->isEnabled()){
         if (color) this->setStyleSheet("QPushButton{background:#00FF00;}");
@@ -31,7 +31,7 @@ void PinButton::setColor(uint8_t port_in, uint8_t pin_in, bool color)
     }
 }
 
-void PinButton::enableButton(uint8_t port_in, uint8_t pin_in, bool b)
+void PinButton::enableButton(quint8 port_in, quint8 pin_in, bool b)
 {
     if (port_in == port && pin_in == pin){
         this->setEnabled(b);

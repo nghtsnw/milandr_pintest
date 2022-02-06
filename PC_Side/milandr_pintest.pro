@@ -5,16 +5,16 @@ TARGET = milandr_pintest
 TEMPLATE = app
 
 SOURCES += \
+    connection.cpp \
     main.cpp \
     mainwindow.cpp \
     pinbutton.cpp \
-    rxparcer.cpp \
     settingsdialog.cpp
 
 HEADERS += \
+    connection.h \
     mainwindow.h \
     pinbutton.h \
-    rxparcer.h \
     settingsdialog.h
 
 FORMS += \
