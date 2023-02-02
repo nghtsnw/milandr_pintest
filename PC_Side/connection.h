@@ -39,7 +39,7 @@ private:
     QVector<quint8> snapshot;
     bool ok;
     quint8 calcCrc(const QVector<quint8> &arr);
-    bool newcommand;
+    bool newcommand = false;
     QVector<quint8> toTransmit;
 
 private slots:

@@ -21,5 +21,7 @@ FORMS += \
     mainwindow.ui \
     settingsdialog.ui
 
-target.path = $$[QT_INSTALL_EXAMPLES]/serialport/terminal
-INSTALLS += target
+DISTFILES +=
+
+RESOURCES += \
+    res.qrc

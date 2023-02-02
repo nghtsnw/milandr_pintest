@@ -1,0 +1,7 @@
+<RCC>
+    <qresource prefix="/new/milandrs">
+        <file>ve91.png</file>
+        <file>ve92.png</file>
+        <file>ve93.png</file>
+    </qresource>
+</RCC>

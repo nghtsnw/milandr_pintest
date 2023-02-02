@@ -23,7 +23,7 @@
       <item row="0" column="0">
        <widget class="QLabel" name="baudRateLabel">
         <property name="text">
-         <string>Битрэйт:</string>
+         <string>Битрейт:</string>
         </property>
        </widget>
       </item>

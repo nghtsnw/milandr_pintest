@@ -25,6 +25,7 @@ MainWindow::MainWindow(QWidget *parent) :
 {
     m_ui->setupUi(this);
     m_ui->statusBar->addWidget(m_status);
+    m_ui->pix->setStyleSheet("background-color: white;");
     qRegisterMetaType<QVector<quint8>>("QVector<quint8>");
     qRegisterMetaType<QSerialPort::SerialPortError>("QSerialPort::SerialPortError");
     backend = new Connection;
@@ -59,7 +60,8 @@ MainWindow::MainWindow(QWidget *parent) :
     }    
     fillPortsInfo();
     updateSettings();
-    showStatusMessage("Milandr Pin Test, Илья Кияшко, 2022");
+    showStatusMessage("Milandr Pin Test, Илья Кияшко, 2023");
+    setPix();
 }
 
 MainWindow::~MainWindow()
@@ -82,10 +84,11 @@ void MainWindow::openSerialPort()
     backend->m_serial->setFlowControl(p.flowControl);
     if (backend->m_serial->open(QIODevice::ReadWrite))
     {
-        connectionMessage = (tr("Соединено с %1 : %2, %3, %4, %5, %6")
+        connectionMessage = (tr("Открыт порт %1 : %2, %3, %4, %5, %6")
                              .arg(p.name).arg(p.stringBaudRate).arg(p.stringDataBits)
-                             .arg(p.stringParity).arg(p.stringStopBits).arg(p.stringFlowControl));
+                             .arg(p.stringParity).arg(p.stringStopBits).arg(p.stringFlowControl));        
         showStatusMessage(connectionMessage);
+        m_status->setStyleSheet("QLabel{background:#00FF00;}");
         emit mcuMessageTimer(250, true); // Пинаем контроллер с этим таймером, в ответ получаем данные
         emit responseWaitingTimer(3000, true); // Если нет ответа от контроллера и этот таймер вышел, то считаем что нет соединения
     }
@@ -93,6 +96,7 @@ void MainWindow::openSerialPort()
     {
         QMessageBox::critical(this, tr("Ошибка"), backend->m_serial->errorString());
         showStatusMessage(tr("Ошибка открытия"));
+        m_status->setStyleSheet("QLabel{background:#FF0000;}");
     }
 }
 
@@ -103,6 +107,7 @@ void MainWindow::closeSerialPort()
     emit responseWaitingTimer(0, false);
     resetConnection();
     showStatusMessage(tr("Соединение отключено"));
+    m_status->setStyleSheet("QLabel{background:none;}");
 }
 
 void MainWindow::handleError(QSerialPort::SerialPortError error)
@@ -141,8 +146,8 @@ void MainWindow::fillPortsInfo()
 void MainWindow::updateSettings()
 { // по умолчанию всё задумано работать так, конечному пользователю будет проще жить
     m_currentSettings.name = m_ui->portBox->currentText();
-    m_currentSettings.baudRate = 115200;
-    m_currentSettings.stringBaudRate = QString::number(115200);
+    m_currentSettings.baudRate = 9600;
+    m_currentSettings.stringBaudRate = QString::number(9600);
     m_currentSettings.dataBits = QSerialPort::Data8;
     m_currentSettings.stringDataBits = QString::number(8);
     m_currentSettings.parity = QSerialPort::EvenParity;
@@ -178,6 +183,10 @@ void MainWindow::slotCustomMenuRequested()
 
     QMenu * menu = new QMenu(this);
 
+    QAction * title = new QAction(QString::number(currentPin));
+    if (currentPort < pnamestr.size())
+    title = new QAction((pnamestr.at(currentPort) + QString::number(currentPin)), this);
+    title->setDisabled(true);
     QAction * setInput = new QAction(("Вход с подтяжкой к питанию (по умолчанию)"), this);
     QAction * setOutput1 = new QAction(("Выход в состояние 1"), this);
     QAction * setOutput0 = new QAction(("Выход в состояние 0"), this);
@@ -188,6 +197,8 @@ void MainWindow::slotCustomMenuRequested()
     connect(setOutput0, SIGNAL(triggered()), this, SLOT(setOutput0()));
     connect(setOutputBlink, SIGNAL(triggered()), this, SLOT(setOutputBlink()));
 
+    menu->addAction(title);
+    menu->addSeparator();
     menu->addAction(setInput);
     menu->addAction(setOutput1);
     menu->addAction(setOutput0);
@@ -245,6 +256,7 @@ void MainWindow::toPinButtonSender(QVector<quint8> snapshot)
             milandrIndex = snapshot[2];
             enableButtonsForDevice();
             showStatusMessage("Соединение установлено. " + connectionMessage);
+            m_status->setStyleSheet("QLabel{background:#00FF00;}");
         }
         porta = snapshot[3] + (snapshot[4] << 8);
         portb = snapshot[5] + (snapshot[6] << 8);
@@ -266,6 +278,7 @@ void MainWindow::toPinButtonSender(QVector<quint8> snapshot)
             default: portarray = 0; break;
         }
     setPinStatus(i, portarray);
+    setPix();
     }
 }
 
@@ -273,11 +286,7 @@ void MainWindow::setPinStatus(quint8 portname, const uint16_t *portarray)
 {
     static const uint16_t mask = 0x01;
     for (quint8 pin = 0; pin < 16; pin++)
-    {
-        if (*portarray & (mask << pin))
-            emit pinStatus(portname, pin, true);
-        else emit pinStatus(portname, pin, false);
-    }
+        emit pinStatus(portname, pin, (*portarray & (mask << pin)));
 }
 
 void MainWindow::enableButtonsForDevice()
@@ -300,8 +309,9 @@ void MainWindow::enableButtonsForDevice()
 }
 
 void MainWindow::resetConnection()
-{
-        showStatusMessage(tr("Нет ответа от микроконтроллера"));
+{    
+    showStatusMessage(connectionMessage + ". " + tr("Нет ответа от микроконтроллера. Продолжается ожидание корректного ответа..."));
+    m_status->setStyleSheet("QLabel{background:#FFFF00;}");
         for (int x = 0, y = 0, count = 0; count < (6*16); count++, x++) // Блокируем кнопки в интерфейсе
         {
             if (x > 15)
@@ -312,6 +322,7 @@ void MainWindow::resetConnection()
             emit enableButton(y, x, false);
         }
         milandrIndex = 0;
+        setPix();
 }
 
 void MainWindow::showStatusMessage(const QString &message)
@@ -324,16 +335,50 @@ void MainWindow::on_connectButton_clicked()
     if (backend->m_serial->isOpen()){
         closeSerialPort();
         m_ui->connectButton->setText("Подключить");
+        m_ui->portBox->setDisabled(false);
     }
     else{
         openSerialPort();
         m_ui->connectButton->setText("Отключить");
+        m_ui->portBox->setDisabled(true);
     }
 }
 
-void MainWindow::on_portBox_currentTextChanged(const QString &arg1)
+void MainWindow::on_portBox_activated(int index)
 {
-    if (arg1 == "Расширенные настройки...")
+    Q_UNUSED(index);
+    if (m_ui->portBox->currentText() == "Расширенные настройки...")
         m_settings->show();
     else updateSettings();
+}
+
+void MainWindow::setPix()
+{
+    switch(milandrIndex)
+    {
+        case 0x01:
+    {
+        m_ui->pix->setEnabled(true);
+        m_ui->pix->setPixmap(QPixmap(":/new/milandrs/ve91.png"));
+        break;
+    }
+        case 0x02:
+    {
+        m_ui->pix->setEnabled(true);
+        m_ui->pix->setPixmap(QPixmap(":/new/milandrs/ve92.png"));
+        break;
+    }
+        case 0x03:
+    {
+        m_ui->pix->setEnabled(true);
+        m_ui->pix->setPixmap(QPixmap(":/new/milandrs/ve93.png"));
+        break;
+    }
+        default:
+    {
+        m_ui->pix->setDisabled(true);
+        m_ui->pix->setPixmap(QPixmap(":/new/milandrs/ve91.png"));
+        break;
+    }
+    }
 }

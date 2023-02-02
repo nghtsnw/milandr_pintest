@@ -8,7 +8,7 @@ Connection::Connection(QObject *parent) : QObject{parent}
 {
     m_serial = new QSerialPort(this);
     connect(m_serial, &QSerialPort::readyRead, this, &Connection::readData);
-    connect(mcu_wdt, &QTimer::timeout, this, &Connection::sendCommand);
+    connect(mcu_wdt, &QTimer::timeout, this, &Connection::sendCommand); // Тут сыпется релиз при подключении
     connect(response_wdt, &QTimer::timeout, this, [=]{emit resetConnection();});
 }
 

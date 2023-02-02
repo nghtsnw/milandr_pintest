@@ -59,13 +59,13 @@ private slots:
     void setOutput0();
     void setOutputBlink();
     void on_connectButton_clicked();
-    void on_portBox_currentTextChanged(const QString &arg1);
     void fillPortsInfo();
     void updateSettings();
     void openSerialPort();
     void closeSerialPort();
     void applyCustomSettings();
     void resetConnection();
+    void on_portBox_activated(int index);
 
 private:
     const int commandSize = 4;
@@ -93,6 +93,7 @@ private:
     QString connectionMessage;
     quint8 currentPort;
     quint8 currentPin;
+    void setPix();
 
     int blinkPort = 999; // Стартовые значения не равные тому какими могут быть порты и пины
     int blinkPin = 999;
