@@ -74,9 +74,8 @@ void UART_Initialize (uint32_t uartBaudRate)
   // Инициализация модуля UART
   UART_Init (UART_X, &UARTInitStruct);
 
-  // Выбор предделителя тактовой частоты модуля UART
+  // Выбор предделителя тактовой частоты модуля UART	
   UART_BRGInit (UART_X, UART_HCLKdiv1);
-
 
   // Выбор источников прерываний (прием и передача данных)
   UART_ITConfig (UART_X, UART_IT_RX | UART_IT_TX, ENABLE);

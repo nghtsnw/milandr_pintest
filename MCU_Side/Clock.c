@@ -95,7 +95,7 @@ void Clock_Init_HSE_dir(void)
 // -------------------------- USE_MDR1986VE9x ---------------------	
 #elif defined ( USE_MDR1986VE9x )
 
-void Clock_Init_HSE_PLL(uint32_t PLL_Mul)  // 128 MHz
+void Clock_Init_HSE_PLL(uint32_t PLL_Mul)
 {
   // Сброс настроек системы тактирования
   RST_CLK_DeInit();
@@ -118,8 +118,12 @@ void Clock_Init_HSE_PLL(uint32_t PLL_Mul)  // 128 MHz
   RST_CLK_CPU_PLLuse (ENABLE);
 
   // Настройка коэффициента деления блока CPU_C3_SEL
-  // (CPU_C3_SEL = CPU_C2)
+  // (CPU_C3_SEL = CPU_C2)  
+	
+	if (HSE_Value * PLL_MUL == HSE_Value) // 8 МГц
   RST_CLK_CPUclkPrescaler (RST_CLK_CPUclkDIV1);
+	else if (HSE_Value * PLL_MUL == HSE_Value) // 16 МГц
+  RST_CLK_CPUclkPrescaler (RST_CLK_CPUclkDIV2);
 
   // Использование процессором сигнала CPU_C3
   // (HCLK = CPU_C3)

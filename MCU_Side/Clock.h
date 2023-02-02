@@ -1,6 +1,7 @@
 #ifndef _CLOCK_H
 #define _CLOCK_H
 
+#include "global.h"
 
 void Clock_Init_HSE_PLL(uint32_t PLL_Mul);
 
